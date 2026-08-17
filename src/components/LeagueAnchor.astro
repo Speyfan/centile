@@ -1,0 +1,172 @@
+---
+/**
+ * Ancrage d'une ligue : sa valeur, son incertitude, et surtout ce qu'il vaut.
+ *
+ * L'ancrage vit en logits de winrate — une unité que personne ne lit. Il est
+ * donc affiché en **points de score**, ce qu'il ajoute ou retire à la note
+ * d'un joueur de cette ligue. La conversion est faite à l'export
+ * (`anchor_points`) : ce composant lit deux nombres, il n'en calcule aucun.
+ * Les logits restent affichés en petit, pour qui veut vérifier.
+ *
+ * Un ancrage non identifié sort à NULL avec son motif, jamais à 0 : « on ne
+ * sait pas » et « ligue moyenne » sont deux affirmations différentes.
+ */
+import type { League } from "../lib/contract";
+import { num } from "../lib/display";
+
+type Season = League["seasons"][number];
+
+interface Props {
+  anchor: {
+    value: number | null;
+    ci_low: number | null;
+    ci_high: number | null;
+    status: string | null;
+    publication: string | null;
+    scale_source: string | null;
+    conf_reason: string | null;
+    transf_reason: string | null;
+    n_eff_conf: number | null;
+    n_eff_transf: number | null;
+    parts: { conf: number | null; transf: number | null; selection_bias: number | null };
+  } | null;
+  /** Le même ancrage, déjà converti en points de score par l'export. */
+  points: Season["anchor_points"];
+  year: number;
+  league: string;
+}
+
+const { anchor, points, year, league } = Astro.props;
+
+const REASONS: Record<string, string> = {
+  no_cross_games: "aucune rencontre inter-ligues",
+  thin_bridge: "trop peu de rencontres inter-ligues pour conclure",
+  separated: "ligue isolée du reste du réseau",
+  no_transfers: "aucun transfert exploitable",
+  no_calibration: "aucune échelle de référence atteignable",
+};
+
+const STATUS: Record<string, string> = {
+  combined: "confrontations + transferts",
+  conf_only: "confrontations seules",
+  transf_only: "transferts seuls",
+  none: "aucun signal",
+};
+
+/**
+ * `local` : l'ancrage flotte sur une composante du réseau qui n'a jamais
+ * touché la référence. Il ordonne les ligues entre elles à l'intérieur de
+ * cette composante, et rien d'autre.
+ */
+const isLocalScale = anchor?.scale_source === "local";
+---
+
+<div class="rounded-xl border border-line bg-surface p-4">
+  {
+    anchor === null || anchor.value === null ? (
+      <>
+        <p class="m-0 text-sm font-medium text-ink">
+          Pas d'ancrage pour {league} en {year}
+        </p>
+        <p class="mt-1.5 text-xs leading-relaxed text-muted">
+          L'écart entre cette ligue et le reste du monde n'est pas mesurable
+          sur cette saison. Les scores de ses joueurs restent des rangs
+          internes : ils ne se comparent qu'entre eux.
+        </p>
+        <ul class="mt-2 list-none space-y-0.5 p-0 text-xs text-faint">
+          {anchor?.conf_reason && (
+            <li>
+              Confrontations : {REASONS[anchor.conf_reason] ?? anchor.conf_reason}
+            </li>
+          )}
+          {anchor?.transf_reason && (
+            <li>
+              Transferts : {REASONS[anchor.transf_reason] ?? anchor.transf_reason}
+            </li>
+          )}
+        </ul>
+      </>
+    ) : (
+      <>
+        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span class="tnum text-3xl font-bold leading-none tracking-tight">
+            {points && points.value > 0 ? "+" : ""}
+            {points ? num(points.value) : "—"}
+          </span>
+          <span class="text-sm text-faint">points de score</span>
+          {points && (
+            <span class="tnum text-sm text-muted">
+              ± {num(
+                Math.max(points.value - points.ci_low, points.ci_high - points.value),
+              )}
+            </span>
+          )}
+        </div>
+
+        <p class="mt-1 text-xs leading-relaxed text-muted">
+          Ce que jouer en {league} en {year} ajoute au score d'un joueur, par
+          rapport à la moyenne des ligues de premier niveau.
+          <span class="tnum text-faint">
+            {" "}({num(anchor.value, 1)} logit, IC {num(anchor.ci_low!, 2)} –{" "}
+            {num(anchor.ci_high!, 2)})
+          </span>
+        </p>
+
+        <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs sm:grid-cols-3">
+          <div>
+            <dt class="text-faint">Signal</dt>
+            <dd class="m-0 text-ink">{STATUS[anchor.status ?? ""] ?? anchor.status}</dd>
+          </div>
+          <div>
+            <dt class="text-faint">Statut</dt>
+            <dd class="m-0 text-ink">
+              {anchor.publication === "published" ? "Publié" : "Expérimental"}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-faint">Matière</dt>
+            <dd class="tnum m-0 text-ink">
+              {anchor.n_eff_conf !== null && `${num(anchor.n_eff_conf, 0)} parties`}
+              {anchor.n_eff_conf !== null && anchor.n_eff_transf !== null && " · "}
+              {anchor.n_eff_transf !== null && `${num(anchor.n_eff_transf, 0)} transferts`}
+            </dd>
+          </div>
+        </dl>
+
+        {(anchor.conf_reason || anchor.transf_reason) && (
+          <ul class="mt-2 list-none space-y-0.5 p-0 text-xs text-faint">
+            {anchor.conf_reason && (
+              <li>
+                Signal confrontations écarté :{" "}
+                {REASONS[anchor.conf_reason] ?? anchor.conf_reason}
+              </li>
+            )}
+            {anchor.transf_reason && (
+              <li>
+                Signal transferts écarté :{" "}
+                {REASONS[anchor.transf_reason] ?? anchor.transf_reason}
+              </li>
+            )}
+          </ul>
+        )}
+
+        {isLocalScale && (
+          <p class="mt-3 rounded-md border border-tone-low/40 bg-tone-low/10 px-3 py-2 text-xs leading-relaxed text-tone-low">
+            <strong class="font-semibold">Échelle locale, non comparable.</strong>{" "}
+            Cet ancrage repose sur un groupe de ligues qui n'a aucun lien
+            mesuré avec le circuit de référence. Il ordonne ces ligues entre
+            elles ; le comparer à la LCK ou à la LEC n'aurait pas de sens.
+          </p>
+        )}
+
+        {anchor.publication !== "published" && !isLocalScale && (
+          <p class="mt-3 rounded-md border border-tone-mid/40 bg-tone-mid/10 px-3 py-2 text-xs leading-relaxed text-tone-mid">
+            <strong class="font-semibold">Ancrage expérimental.</strong> La
+            matière disponible ne suffit pas à resserrer l'intervalle : la
+            valeur est affichée, elle n'est pas opposable.
+          </p>
+        )}
+      </>
+    )
+  }
+</div>

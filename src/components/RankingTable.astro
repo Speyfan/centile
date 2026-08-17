@@ -1,0 +1,194 @@
+---
+/**
+ * Classement d'une saison, filtrable rôle × ligue sans rechargement.
+ *
+ * `published` est le défaut. Les scores `experimental` sont dans la page mais
+ * masqués : les révéler lève un bandeau d'avertissement, parce qu'un score
+ * expérimental ne se compare pas à celui d'une autre ligue et qu'un
+ * classement mélangé le laisserait croire.
+ *
+ * Le rang affiché est celui du classement **filtré** : sortir un rôle du
+ * filtre ne doit pas laisser des trous dans la numérotation.
+ */
+import type { Meta, Ranking } from "../lib/contract";
+import { ROLE_LABELS, STATUS_LABELS, int, num } from "../lib/display";
+
+interface Props {
+  ranking: Ranking;
+  meta: Meta;
+  leagues: { league: string; label: string }[];
+}
+
+const { ranking, meta, leagues } = Astro.props;
+
+const rows = ranking.rows
+  .filter((row) => row.score !== null)
+  .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+const present = new Set(rows.map((row) => row.league));
+const options = leagues
+  .filter((entry) => present.has(entry.league))
+  .sort((a, b) => a.league.localeCompare(b.league));
+
+const nPublished = rows.filter((row) => row.status === "published").length;
+---
+
+<section id="classement" data-experimental="off">
+  <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Rôle">
+    <button
+      type="button"
+      data-role-filter="all"
+      aria-current="true"
+      class="rounded-md border border-line bg-surface px-2.5 py-1 text-xs text-muted aria-[current=true]:border-accent/50 aria-[current=true]:bg-accent/10 aria-[current=true]:text-ink"
+      >Tous</button
+    >
+    {
+      meta.roles.map((role) => (
+        <button
+          type="button"
+          data-role-filter={role}
+          aria-current="false"
+          class="rounded-md border border-line bg-surface px-2.5 py-1 text-xs text-muted aria-[current=true]:border-accent/50 aria-[current=true]:bg-accent/10 aria-[current=true]:text-ink"
+        >
+          {ROLE_LABELS[role]}
+        </button>
+      ))
+    }
+  </div>
+
+  <div class="mt-2 flex flex-wrap items-center gap-3">
+    <label class="text-xs text-muted">
+      Ligue
+      <select
+        id="league-filter"
+        class="ml-1 rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink"
+      >
+        <option value="all">Toutes</option>
+        {options.map((entry) => <option value={entry.league}>{entry.league}</option>)}
+      </select>
+    </label>
+
+    <label class="flex items-center gap-1.5 text-xs text-muted">
+      <input id="toggle-experimental" type="checkbox" class="accent-[var(--color-accent)]" />
+      Inclure les scores expérimentaux
+    </label>
+  </div>
+
+  <p
+    id="experimental-warning"
+    hidden
+    class="mt-2 rounded-md border border-tone-mid/40 bg-tone-mid/10 px-3 py-2 text-xs leading-snug text-tone-mid"
+  >
+    <strong class="font-semibold">Classement non homogène.</strong> Les scores
+    marqués « expérimental » viennent de ligues dont l'écart avec le reste du
+    monde n'est pas établi : leur position dans ce tableau n'est pas opposable
+    à celle d'un joueur publié. Ils sont là pour être explorés, pas pour être
+    comparés.
+  </p>
+
+  <p class="mt-2 text-xs text-faint">
+    <span class="tnum" id="row-count">{nPublished}</span> joueurs ·
+    fenêtre saison complète · un score n'est comparable entre ligues que s'il
+    est publié.
+  </p>
+
+  <ol id="ranking-rows" class="mt-2 list-none space-y-1 p-0">
+    {
+      rows.map((row) => (
+        <li
+          data-row
+          data-role={row.role}
+          data-league={row.league}
+          data-status={row.status}
+          hidden={row.status !== "published"}
+          class="flex items-center gap-2.5 rounded-lg border border-line bg-surface px-2.5 py-2"
+        >
+          <span
+            data-rank
+            class="tnum w-7 shrink-0 text-right text-xs text-faint"
+          />
+          <span class="min-w-0 flex-1">
+            <a
+              href={`/joueur/${row.slug}`}
+              class="block truncate text-sm font-medium hover:underline"
+            >
+              {row.handle}
+            </a>
+            {/* La ligue avant l'équipe : « Hanwha Life Esports » suffit à
+                pousser « LCK » hors du cadre, et c'est la ligue qui porte la
+                comparabilité du score. */}
+            <span class="block truncate text-[11px] text-faint">
+              {ROLE_LABELS[row.role]} ·{" "}
+              <a href={`/ligue/${row.league}`} class="hover:underline">
+                {row.league}
+              </a>{" "}
+              · {row.team ?? "sans équipe"}
+            </span>
+          </span>
+          <span class="w-24 shrink-0 text-right">
+            <span class="tnum text-base font-semibold">{num(row.score ?? 0)}</span>
+            <span class="tnum block text-[11px] text-faint">
+              ± {num(Math.max((row.score ?? 0) - (row.ci_low ?? 0), (row.ci_high ?? 0) - (row.score ?? 0)))}
+              {" · "}
+              {int(row.n_games)} p.
+            </span>
+          </span>
+          {row.status !== "published" && (
+            <span class="shrink-0 rounded border border-tone-mid/40 px-1 text-[10px] text-tone-mid">
+              {STATUS_LABELS[row.status]}
+            </span>
+          )}
+        </li>
+      ))
+    }
+  </ol>
+</section>
+
+<script>
+  // Filtrage local : la page porte déjà toutes les lignes de la saison, il n'y
+  // a rien à recharger. Sans JavaScript, le classement publié reste affiché
+  // en entier — c'est la vue par défaut, pas une vue dégradée.
+  const root = document.getElementById("classement");
+  if (root) {
+    const rows = [...root.querySelectorAll<HTMLElement>("[data-row]")];
+    const count = root.querySelector<HTMLElement>("#row-count");
+    const warning = root.querySelector<HTMLElement>("#experimental-warning");
+    const toggle = root.querySelector<HTMLInputElement>("#toggle-experimental");
+    const league = root.querySelector<HTMLSelectElement>("#league-filter");
+    let role = "all";
+
+    const apply = () => {
+      const withExperimental = toggle?.checked ?? false;
+      let rank = 0;
+      for (const row of rows) {
+        const ok =
+          (role === "all" || row.dataset.role === role) &&
+          (league?.value === "all" || row.dataset.league === league?.value) &&
+          (withExperimental || row.dataset.status === "published");
+        row.hidden = !ok;
+        if (ok) {
+          rank += 1;
+          const cell = row.querySelector<HTMLElement>("[data-rank]");
+          if (cell) cell.textContent = String(rank);
+        }
+      }
+      if (count) count.textContent = String(rank);
+      if (warning) warning.hidden = !withExperimental;
+    };
+
+    root.addEventListener("click", (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLElement>(
+        "[data-role-filter]",
+      );
+      if (!button?.dataset.roleFilter) return;
+      role = button.dataset.roleFilter;
+      root.querySelectorAll<HTMLElement>("[data-role-filter]").forEach((node) => {
+        node.setAttribute("aria-current", String(node.dataset.roleFilter === role));
+      });
+      apply();
+    });
+    toggle?.addEventListener("change", apply);
+    league?.addEventListener("change", apply);
+    apply();
+  }
+</script>

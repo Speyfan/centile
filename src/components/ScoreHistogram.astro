@@ -1,0 +1,112 @@
+---
+/**
+ * Distribution des scores d'une ligue — histogramme SVG.
+ *
+ * Les bornes des classes sont écrites sous l'axe et l'effectif au-dessus de
+ * chaque barre : la forme se lit d'un coup d'œil, les nombres restent
+ * disponibles sans survol.
+ */
+import { int, num } from "../lib/display";
+
+interface Props {
+  histogram: { from: number; bin_width: number; counts: number[] } | null;
+  median: number | null;
+  n: number;
+}
+
+const { histogram, median, n } = Astro.props;
+
+const W = 640;
+const H = 170;
+const PAD_L = 8;
+const PAD_R = 8;
+const PAD_TOP = 18;
+const PAD_BOTTOM = 26;
+
+const counts = histogram?.counts ?? [];
+const peak = Math.max(1, ...counts);
+const bandWidth =
+  counts.length > 0 ? (W - PAD_L - PAD_R) / counts.length : 0;
+const barHeight = (count: number) =>
+  (count / peak) * (H - PAD_TOP - PAD_BOTTOM);
+const edge = (i: number) => (histogram?.from ?? 0) + i * (histogram?.bin_width ?? 5);
+
+// Une étiquette sur deux quand les classes s'accumulent : sur 360 px, dix
+// bornes se chevauchent.
+const labelEvery = counts.length > 8 ? 2 : 1;
+---
+
+{
+  histogram === null || counts.length === 0 ? (
+    <p class="text-sm text-muted">Aucun score publié à distribuer.</p>
+  ) : (
+    <figure class="m-0">
+      <div class="overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          class="h-auto w-full min-w-[320px]"
+          role="img"
+          aria-label={`Distribution des scores : ${n} joueurs, médiane ${median === null ? "inconnue" : num(median)}`}
+        >
+          {counts.map((count, i) => (
+            <g>
+              <rect
+                x={PAD_L + i * bandWidth + 1}
+                y={H - PAD_BOTTOM - barHeight(count)}
+                width={Math.max(1, bandWidth - 2)}
+                height={barHeight(count)}
+                fill="var(--color-accent)"
+                opacity="0.55"
+                rx="2"
+              >
+                <title>
+                  {`${num(edge(i), 0)} à ${num(edge(i + 1), 0)} : ${int(count)} joueurs`}
+                </title>
+              </rect>
+              {count > 0 && (
+                <text
+                  x={PAD_L + i * bandWidth + bandWidth / 2}
+                  y={H - PAD_BOTTOM - barHeight(count) - 5}
+                  text-anchor="middle"
+                  font-size="10"
+                  fill="var(--color-muted)"
+                  class="tnum"
+                >
+                  {int(count)}
+                </text>
+              )}
+              {i % labelEvery === 0 && (
+                <text
+                  x={PAD_L + i * bandWidth}
+                  y={H - 8}
+                  text-anchor="middle"
+                  font-size="10"
+                  fill="var(--color-faint)"
+                  class="tnum"
+                >
+                  {num(edge(i), 0)}
+                </text>
+              )}
+            </g>
+          ))}
+
+          <line
+            x1={PAD_L}
+            x2={W - PAD_R}
+            y1={H - PAD_BOTTOM}
+            y2={H - PAD_BOTTOM}
+            stroke="var(--color-line)"
+          />
+        </svg>
+      </div>
+      <figcaption class="mt-1 text-xs text-faint">
+        {int(n)} joueurs notés
+        {median !== null && (
+          <span class="tnum"> · médiane {num(median)}</span>
+        )}
+        {" · classes de "}
+        {num(histogram.bin_width, 0)} points.
+      </figcaption>
+    </figure>
+  )
+}

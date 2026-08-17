@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+/*
+ * Sombre par défaut. La palette est volontairement courte : le pizza chart
+ * est le seul moment coloré de la page, tout le reste est gris pour le
+ * laisser dominer.
+ *
+ * Les trois tons de percentile sont doublés par la valeur écrite partout où
+ * ils apparaissent — jamais de couleur seule. Contrastes vérifiés AA sur le
+ * fond sombre, et texte foncé sur les aplats clairs.
+ */
+@theme {
+  --color-bg: #0b0e14;
+  --color-surface: #131822;
+  --color-surface-2: #1a2130;
+  --color-line: #232c3d;
+  --color-ink: #e7ecf5;
+  --color-muted: #93a0b5;
+  --color-faint: #6b7789;
+  --color-accent: #6ea8fe;
+
+  --color-tone-high: #34d399;
+  --color-tone-mid: #fbbf24;
+  --color-tone-low: #fb923c;
+  --color-tone-none: #38435a;
+
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+}
+
+:root {
+  --tone-high: var(--color-tone-high);
+  --tone-mid: var(--color-tone-mid);
+  --tone-low: var(--color-tone-low);
+  --tone-none: var(--color-tone-none);
+  color-scheme: dark;
+}
+
+html {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+/* Chiffres alignés : une colonne de scores ne doit pas danser. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+a {
+  color: inherit;
+}
+
+/* Le focus doit rester visible : la fiche se navigue au clavier. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}

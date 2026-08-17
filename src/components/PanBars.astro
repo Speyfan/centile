@@ -1,0 +1,173 @@
+---
+/**
+ * Détail des pans : une barre par pan, dépliable sur ses stats.
+ *
+ * Trois règles y sont visibles en permanence :
+ *   - chaque valeur porte son `n` (le pan ne compte que les parties portant
+ *     toute sa base, ce `n` vaut donc aussi pour chacune de ses stats) ;
+ *   - chaque pan absent affiche son motif, en clair, sans survol ;
+ *   - un pan descriptif est étiqueté comme tel : il décrit, il ne note pas.
+ */
+import type { Meta, Pan } from "../lib/contract";
+import {
+  PAN_HINTS,
+  PAN_LABELS,
+  STAT_LABELS,
+  gapScope,
+  hasUsableInterval,
+  int,
+  num,
+  panTone,
+  unavailableMessage,
+} from "../lib/display";
+
+interface Props {
+  pans: Pan[];
+  role: string;
+  league: string;
+  meta: Meta;
+}
+
+const { pans, role, league, meta } = Astro.props;
+const weights = meta.pans.scored_by_role[role] ?? {};
+const descriptive = new Set(meta.pans.descriptive);
+
+const ordered = [...pans].sort((a, b) => {
+  const wa = weights[a.pan] ?? -1;
+  const wb = weights[b.pan] ?? -1;
+  return wb - wa;
+});
+
+const toneClass: Record<string, string> = {
+  high: "bg-tone-high",
+  mid: "bg-tone-mid",
+  low: "bg-tone-low",
+  none: "bg-tone-none",
+};
+---
+
+<ul class="m-0 list-none space-y-2 p-0">
+  {
+    ordered.map((pan) => {
+      const label = PAN_LABELS[pan.pan] ?? pan.pan;
+      const weight = weights[pan.pan];
+      const isDescriptive = descriptive.has(pan.pan);
+      const tone = panTone(pan.percentile);
+
+      return (
+        <li class="rounded-lg border border-line bg-surface">
+          <details>
+            <summary class="flex items-center gap-3 px-3 py-2.5">
+              <span class="min-w-0 flex-1">
+                <span class="flex items-baseline gap-2">
+                  <span class="truncate text-sm font-medium">{label}</span>
+                  {isDescriptive ? (
+                    <span class="shrink-0 rounded border border-line px-1 text-[10px] uppercase tracking-wide text-faint">
+                      descriptif
+                    </span>
+                  ) : (
+                    <span class="tnum shrink-0 text-[11px] text-faint">
+                      {Math.round((weight ?? 0) * 100)} % de la note
+                    </span>
+                  )}
+                </span>
+
+                {pan.percentile === null ? (
+                  /* Le motif est lisible sans interaction : une fiche est
+                     souvent lue en image, où rien ne se déplie. */
+                  <span class="mt-1 block text-[11px] leading-snug text-muted">
+                    {unavailableMessage(pan.unavailable, league, meta)}
+                  </span>
+                ) : (
+                  <span class="mt-1.5 block h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+                    <span
+                      class={`block h-full rounded-full ${toneClass[tone]}`}
+                      style={`width:${Math.max(2, pan.percentile)}%`}
+                    />
+                  </span>
+                )}
+              </span>
+
+              <span class="w-24 shrink-0 text-right">
+                {pan.percentile === null ? (
+                  <span class="text-sm text-faint">indispo.</span>
+                ) : (
+                  <>
+                    <span class="tnum text-base font-semibold">
+                      {num(pan.percentile, 0)}
+                    </span>
+                    <span class="tnum block text-[11px] text-faint">
+                      {hasUsableInterval(pan) ? (
+                        <>
+                          {num(pan.ci_low, 0)}–{num(pan.ci_high, 0)} ·{" "}
+                        </>
+                      ) : (
+                        <span title="Intervalle non exploitable : trop d'ex æquo dans ce pool pour que le rééchantillonnage encadre la valeur.">
+                          IC n/d ·{" "}
+                        </span>
+                      )}
+                      n&nbsp;=&nbsp;{int(pan.n_games)}
+                    </span>
+                  </>
+                )}
+              </span>
+            </summary>
+
+            <div class="border-t border-line px-3 py-2.5 text-xs">
+              <p class="mb-2 text-faint">{PAN_HINTS[pan.pan]}</p>
+
+              {pan.percentile === null ? (
+                <p class="rounded border border-tone-none bg-surface-2 px-2.5 py-2 text-muted">
+                  <span class="font-medium text-ink">Pan non calculé</span> —{" "}
+                  {unavailableMessage(pan.unavailable, league, meta)}. Concerne{" "}
+                  {gapScope(pan.unavailable)}
+                  {pan.unavailable.scope === "pool" &&
+                    pan.unavailable.n_stats !== undefined &&
+                    ` (${pan.unavailable.n_stats} stat sur ${pan.unavailable.n_stats_expected} disponible)`}
+                  . Les poids sont renormalisés sur les pans restants : ce joueur
+                  n'est pas pénalisé, il est noté sur moins de matière.
+                </p>
+              ) : (
+                <ul class="m-0 list-none space-y-1.5 p-0">
+                  {Object.entries(pan.stats).map(([stat, value]) => (
+                    <li class="flex items-center gap-3">
+                      <span class="flex-1 truncate text-muted">
+                        {STAT_LABELS[stat] ?? stat}
+                        {meta.pans.conditioned_stats.includes(stat) && (
+                          <span
+                            class="ml-1 text-faint"
+                            title="Comparé à la baseline mondiale du champion joué, pas en valeur brute."
+                          >
+                            ᶻ
+                          </span>
+                        )}
+                        {meta.pans.team_grain_stats.includes(stat) && (
+                          <span
+                            class="ml-1 text-faint"
+                            title="Mesurée au grain équipe : décrit le contexte, pas le joueur seul."
+                          >
+                            ⌘
+                          </span>
+                        )}
+                      </span>
+                      <span class="h-1 w-24 overflow-hidden rounded-full bg-surface-2 sm:w-40">
+                        <span
+                          class={`block h-full rounded-full ${toneClass[panTone(value)]}`}
+                          style={`width:${Math.max(2, value)}%`}
+                        />
+                      </span>
+                      <span class="tnum w-16 shrink-0 text-right">
+                        {num(value, 0)}
+                        <span class="ml-1 text-faint">n {int(pan.n_games)}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </details>
+        </li>
+      );
+    })
+  }
+</ul>

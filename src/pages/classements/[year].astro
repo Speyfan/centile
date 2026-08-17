@@ -1,0 +1,54 @@
+---
+/**
+ * Classement d'une saison. Une page par saison : chaque page ne porte que ses
+ * ~2 000 lignes, et l'URL est partageable telle quelle.
+ */
+import Base from "../../layouts/Base.astro";
+import RankingTable from "../../components/RankingTable.astro";
+import { getLeagueIndex, getMeta, getRanking, listRankingYears } from "../../lib/data";
+import { isSeasonInProgress } from "../../lib/display";
+
+export function getStaticPaths() {
+  return listRankingYears().map((year) => ({ params: { year: String(year) } }));
+}
+
+const year = Number(Astro.params.year);
+const meta = getMeta();
+const ranking = getRanking(year);
+const leagues = getLeagueIndex();
+const years = listRankingYears();
+---
+
+<Base
+  title={`Classement ${year} | LoL Scout`}
+  description={`Classement des joueurs professionnels de League of Legends sur la saison ${year}, score mondial sur 100.`}
+>
+  <h1 class="m-0 text-2xl font-bold tracking-tight">Classement {year}</h1>
+
+  <nav class="mt-3 flex flex-wrap gap-1.5" aria-label="Saison">
+    {years.map((other) => (
+      <a
+        href={`/classements/${other}`}
+        aria-current={other === year}
+        class="tnum rounded-md border border-line bg-surface px-2.5 py-1 text-xs text-muted aria-[current=true]:border-accent/50 aria-[current=true]:bg-accent/10 aria-[current=true]:text-ink"
+      >
+        {other}
+      </a>
+    ))}
+  </nav>
+
+    {
+      isSeasonInProgress(year, meta) && (
+        <p class="mt-2 rounded-md border border-line bg-surface px-3 py-2 text-xs leading-snug text-muted">
+          <strong class="font-medium text-ink">Saison en cours.</strong> Les
+          volumes sont encore courts et les intervalles larges : un joueur peut
+          tenir le haut du tableau sur vingt parties. Le classement se
+          stabilise à mesure que la saison avance.
+        </p>
+      )
+    }
+
+  <div class="mt-4">
+    <RankingTable ranking={ranking} meta={meta} leagues={leagues} />
+  </div>
+</Base>

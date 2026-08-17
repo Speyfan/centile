@@ -1,0 +1,30 @@
+{
+  "name": "centile",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "check:data": "tsx scripts/check-data.ts",
+    "check:types": "astro check",
+    "build": "npm run check:data && npm run test && astro build",
+    "preview": "astro preview",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "astro": "^5.14.1"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/node": "^26.2.0",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "zod": "^4.1.11",
+    "vite": "6.4.3"
+  },
+  "overrides": {
+    "vite": "6.4.3"
+  }
+}

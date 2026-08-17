@@ -1,0 +1,376 @@
+---
+/**
+ * La fiche joueur — le cœur du produit.
+ *
+ * Elle doit se lire en dix secondes (pseudo, score, pizza) et supporter
+ * d'être screenshotée : le statut, le ±, le nombre de parties et les pans
+ * manquants sont donc dans l'image, pas dans une info-bulle.
+ *
+ * Une fiche = une URL = un joueur. Les fenêtres (saison, splits, rôles) sont
+ * toutes rendues dans la page ; un commutateur en change l'affichage sans
+ * requête. Sans JavaScript, la fenêtre par défaut — le dernier split joué —
+ * reste visible : c'est celle qu'on partage.
+ */
+import Base from "../../layouts/Base.astro";
+import PanBars from "../../components/PanBars.astro";
+import PizzaChart from "../../components/PizzaChart.astro";
+import ScoreHeadline from "../../components/ScoreHeadline.astro";
+import ScoreHistory from "../../components/ScoreHistory.astro";
+import { isRated, type Window } from "../../lib/contract";
+import { getMeta, getPlayer, getPlayerIndex, sampleFilter } from "../../lib/data";
+import {
+  ROLE_LABELS,
+  ROLE_PLURAL,
+  championClass,
+  int,
+  num,
+  plusMinus,
+  splitLabel,
+} from "../../lib/display";
+
+export function getStaticPaths() {
+  return getPlayerIndex()
+    .filter(sampleFilter())
+    .map((entry) => ({ params: { slug: entry.slug }, props: { id: entry.id } }));
+}
+
+const { id } = Astro.props;
+const meta = getMeta();
+const player = getPlayer(id);
+
+const windows = player.windows;
+const roles = [...new Set(windows.map((w) => w.role))];
+const current =
+  windows.find((w) => w.key === player.default_window) ?? windows.at(-1) ?? null;
+
+/** Fenêtres d'un rôle, de la plus récente à la plus ancienne. */
+const byRole = (role: string): Window[] =>
+  windows
+    .filter((w) => w.role === role)
+    .sort((a, b) => (b.to ?? "").localeCompare(a.to ?? ""));
+
+/** Les fenêtres, de la plus récente à la plus ancienne. */
+const chronological = windows
+  .slice()
+  .sort((a, b) => (b.to ?? "").localeCompare(a.to ?? ""));
+const recent = chronological.slice(0, 4);
+const older = chronological.slice(4);
+
+const title = current
+  ? `${player.handle} — ${ROLE_LABELS[current.role]} ${current.team?.name ?? ""} | LoL Scout`
+  : `${player.handle} | LoL Scout`;
+
+const description = current && isRated(current.score)
+  ? `${player.handle}, ${ROLE_LABELS[current.role]} ${current.league} : score ${num(current.score.world)}/100 ± ${num(plusMinus(current.score))} sur ${current.n_games} parties.`
+  : `${player.handle} : profil et historique de compétition.`;
+---
+
+<Base title={title} description={description}>
+  {
+    !current ? (
+      <section class="rounded-xl border border-line bg-surface p-6">
+        <h1 class="m-0 text-2xl font-bold">{player.handle}</h1>
+        <p class="mt-3 text-sm leading-relaxed text-muted">
+          Ce joueur est présent dans le corpus ({int(player.career.n_games)} parties
+          entre {player.career.first_year} et {player.career.last_year}) mais
+          n'a pas de note.
+        </p>
+        <p class="mt-3 text-sm leading-relaxed text-muted">
+          Une note exige au moins {meta.thresholds.min_games_pan} parties
+          exploitables dans une ligue régulière, et un pool d'au moins{" "}
+          {meta.thresholds.min_pool_size} joueurs du même rôle à qui se
+          comparer. En dessous, un percentile ne mesurerait que le hasard de
+          l'échantillon — nous préférons ne rien afficher plutôt qu'afficher
+          une note que rien ne soutient.
+        </p>
+      </section>
+    ) : (
+      <article id="fiche">
+        {/* ------------------------------------------------- en-tête */}
+        <header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div class="min-w-0">
+            <h1 class="m-0 text-3xl font-bold tracking-tight">{player.handle}</h1>
+            {player.aka.length > 0 && (
+              <p class="mt-0.5 text-xs text-faint">
+                aussi connu comme {player.aka.join(", ")}
+              </p>
+            )}
+            {windows.map((w) => (
+              <p
+                data-window={w.key}
+                hidden={w.key !== current.key}
+                class="mt-1 text-sm text-muted"
+              >
+                <span class="font-medium text-ink">{ROLE_LABELS[w.role]}</span>
+                {w.team?.name && <span> · {w.team.name}</span>}
+                <span> · </span>
+                <a href={`/ligue/${w.league}`} class="hover:underline">
+                  {w.league}
+                </a>
+              </p>
+            ))}
+          </div>
+
+          {windows.map((w) => (
+            <div data-window={w.key} hidden={w.key !== current.key}>
+              {isRated(w.score) ? (
+                <ScoreHeadline score={w.score} />
+              ) : w.score ? (
+                /* Ligue sans ancrage : le rang local existe, la projection
+                   monde n'existe pas. On montre le rang, et on dit pourquoi
+                   il n'y a pas de note sur 100 — pas de note muette. */
+                <div class="flex flex-col items-start gap-1 sm:items-end">
+                  <div class="flex items-baseline gap-1.5">
+                    <span class="tnum text-4xl font-bold leading-none tracking-tight text-muted">
+                      {num(w.score.local_percentile, 0)}
+                    </span>
+                    <span class="text-sm text-faint">e percentile local</span>
+                  </div>
+                  <span class="mt-1 inline-flex items-center rounded-full border border-tone-low/40 bg-tone-low/10 px-2.5 py-0.5 text-xs font-medium text-tone-low">
+                    Pas de score mondial
+                  </span>
+                  <p class="max-w-xs text-xs leading-snug text-tone-low sm:text-right">
+                    Aucun ancrage pour {w.league} en {w.year} : l'écart avec les
+                    autres ligues n'est pas mesurable, un score sur 100 serait
+                    inventé.
+                  </p>
+                </div>
+              ) : (
+                <p class="text-sm text-muted">Fenêtre non notée.</p>
+              )}
+            </div>
+          ))}
+        </header>
+
+        {/* ------------------------------- ligne de contexte : le n, toujours */}
+        {windows.map((w) => (
+          <p
+            data-window={w.key}
+            hidden={w.key !== current.key}
+            class="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 border-y border-line py-2.5 text-xs text-muted"
+          >
+            <span class="font-medium text-ink">
+              {w.year} · {splitLabel(w)}
+            </span>
+            <span class="text-faint">|</span>
+            <span class="tnum">{int(w.n_games)} parties</span>
+            {w.n_detailed < w.n_games && (
+              <span
+                class="tnum text-faint"
+                title="Le flux « partial » d'Oracle's Elixir ne porte pas les stats @10/@15/@20."
+              >
+                (dont {int(w.n_detailed)} avec stats détaillées)
+              </span>
+            )}
+            <span class="text-faint">|</span>
+            <span>
+              percentiles vs {ROLE_PLURAL[w.role]} {w.league}
+              {w.pool?.size && <span class="tnum"> ({w.pool.size} joueurs)</span>}
+            </span>
+            {w.score && w.score.weight_covered < 1 && (
+              <>
+                <span class="text-faint">|</span>
+                <span class="rounded bg-tone-mid/10 px-1.5 py-0.5 font-medium text-tone-mid">
+                  noté sur {num(w.score.weight_covered * 100, 0)} % des pans
+                </span>
+              </>
+            )}
+          </p>
+        ))}
+
+        {/* --------------------------------------------- commutateur */}
+        {/* Vingt-trois fenêtres pour un joueur de sept saisons : déroulées,
+            elles repoussaient le pizza chart sous la ligne de flottaison. Les
+            quatre plus récentes restent visibles, le reste se déplie. */}
+        {(roles.length > 1 || windows.length > 1) && (
+          <nav class="mt-4" aria-label="Fenêtres de mesure">
+            {roles.length > 1 && (
+              <div class="mb-2 flex flex-wrap gap-1.5" data-roles>
+                {roles.map((role) => (
+                  <button
+                    type="button"
+                    data-role-tab={role}
+                    aria-current={role === current.role}
+                    class="rounded-md border border-line bg-surface px-2.5 py-1 text-xs text-muted aria-[current=true]:border-accent/50 aria-[current=true]:bg-accent/10 aria-[current=true]:text-ink"
+                  >
+                    {ROLE_LABELS[role]}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div class="flex flex-wrap gap-1.5">
+              {recent.map((w) => (
+                <button
+                  type="button"
+                  data-goto={w.key}
+                  data-goto-role={w.role}
+                  hidden={w.role !== current.role}
+                  aria-current={w.key === current.key}
+                  class="tnum rounded-md border border-line bg-surface px-2 py-1 text-[11px] text-muted aria-[current=true]:border-accent/50 aria-[current=true]:bg-accent/10 aria-[current=true]:text-ink"
+                >
+                  {w.year} · {w.is_season ? "saison" : w.split}
+                </button>
+              ))}
+            </div>
+            {older.length > 0 && (
+              <details class="mt-1.5">
+                <summary class="inline-block rounded-md border border-line bg-surface px-2 py-1 text-[11px] text-faint">
+                  {older.length} autres fenêtres
+                </summary>
+                <div class="mt-1.5 flex flex-wrap gap-1.5">
+                  {older.map((w) => (
+                    <button
+                      type="button"
+                      data-goto={w.key}
+                      data-goto-role={w.role}
+                      hidden={w.role !== current.role}
+                      aria-current={w.key === current.key}
+                      class="tnum rounded-md border border-line bg-surface px-2 py-1 text-[11px] text-muted aria-[current=true]:border-accent/50 aria-[current=true]:bg-accent/10 aria-[current=true]:text-ink"
+                    >
+                      {w.year} · {w.is_season ? "saison" : w.split} · {w.league}
+                    </button>
+                  ))}
+                </div>
+              </details>
+            )}
+          </nav>
+        )}
+
+        {/* ------------------------------------------------- la pizza */}
+        {windows.map((w) => (
+          <div data-window={w.key} hidden={w.key !== current.key}>
+            <section class="mt-5">
+              <PizzaChart
+                pans={w.pans}
+                role={w.role}
+                league={w.league}
+                meta={meta}
+                uid={`pz-${w.key.replace(/[^a-z0-9]/gi, "")}`}
+              />
+            </section>
+
+            <section class="mt-6">
+              <h2 class="m-0 mb-2 text-sm font-semibold uppercase tracking-wide text-faint">
+                Détail par pan
+              </h2>
+              <PanBars pans={w.pans} role={w.role} league={w.league} meta={meta} />
+              {w.stat_basis && (
+                <details class="mt-2 text-[11px] leading-snug text-faint">
+                  <summary class="text-muted">
+                    Base de stats de ce pool ({w.stat_basis.split("+").length} stats)
+                  </summary>
+                  <p class="mt-1">
+                    <span class="font-mono">{w.stat_basis.replaceAll("+", " · ")}</span>.
+                    Deux joueurs ne sont comparables que sur une base identique :
+                    elle est fixée par le pool (rôle × ligue × fenêtre), pas par
+                    le joueur.
+                  </p>
+                </details>
+              )}
+            </section>
+
+            <section class="mt-6">
+              <h2 class="m-0 mb-2 text-sm font-semibold uppercase tracking-wide text-faint">
+                Pool de champions — {w.year} {splitLabel(w)}
+              </h2>
+              {Object.keys(w.champions).length === 0 ? (
+                <p class="text-sm text-muted">Aucun champion enregistré.</p>
+              ) : (
+                <ul class="m-0 flex list-none flex-wrap gap-1.5 p-0">
+                  {Object.entries(w.champions).map(([champion, games]) => (
+                    <li
+                      class="rounded-md border border-line bg-surface px-2 py-1 text-xs"
+                      title={`Classe : ${championClass(champion, w.role, w.year, meta)}`}
+                    >
+                      {champion}
+                      <span class="tnum ml-1.5 text-faint">{games}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
+        ))}
+
+        {/* --------------------------------------------- historique */}
+        <section class="mt-7">
+          <h2 class="m-0 mb-2 text-sm font-semibold uppercase tracking-wide text-faint">
+            Évolution du score
+          </h2>
+          {roles.map((role) => (
+            <div data-history={role} hidden={role !== current.role}>
+              {roles.length > 1 && (
+                <p class="mb-1 text-xs text-muted">{ROLE_LABELS[role]}</p>
+              )}
+              <ScoreHistory windows={byRole(role).filter((w) => !w.is_season)} />
+            </div>
+          ))}
+          <p class="mt-1 text-[11px] leading-snug text-faint">
+            La bande claire est l'intervalle du score. Sur un split court elle
+            est large : deux points peuvent se croiser sans qu'aucune
+            progression ne soit démontrée.
+          </p>
+        </section>
+      </article>
+    )
+  }
+</Base>
+
+<script>
+  // Commutateur de fenêtre. Sans lui, la fenêtre par défaut reste affichée :
+  // c'est la dégradation qu'on veut, celle qui garde la fiche partageable.
+  //
+  // La fenêtre courante vit dans le fragment d'URL. Une fiche partagée pointe
+  // donc sur la fenêtre qu'on voulait montrer — « Bin en 2025 », pas « Bin »
+  // renvoyé sur son dernier split six mois plus tard.
+  const root = document.getElementById("fiche");
+  if (root) {
+    const show = (key: string, push = true) => {
+      const exists = root.querySelector(`[data-window="${CSS.escape(key)}"]`);
+      if (!exists) return;
+      const role = root
+        .querySelector<HTMLElement>(`[data-goto="${CSS.escape(key)}"]`)
+        ?.dataset.gotoRole;
+
+      root.querySelectorAll<HTMLElement>("[data-window]").forEach((node) => {
+        node.hidden = node.dataset.window !== key;
+      });
+      root.querySelectorAll<HTMLElement>("[data-goto]").forEach((node) => {
+        node.setAttribute("aria-current", String(node.dataset.goto === key));
+        if (role) node.hidden = node.dataset.gotoRole !== role;
+      });
+      if (role) {
+        root.querySelectorAll<HTMLElement>("[data-role-tab]").forEach((node) => {
+          node.setAttribute("aria-current", String(node.dataset.roleTab === role));
+        });
+        root.querySelectorAll<HTMLElement>("[data-history]").forEach((node) => {
+          node.hidden = node.dataset.history !== role;
+        });
+      }
+      if (push) history.replaceState(null, "", `#${encodeURIComponent(key)}`);
+    };
+
+    root.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      const button = target.closest<HTMLElement>("[data-goto]");
+      if (button?.dataset.goto) {
+        show(button.dataset.goto);
+        return;
+      }
+      const tab = target.closest<HTMLElement>("[data-role-tab]");
+      if (tab?.dataset.roleTab) {
+        const first = root.querySelector<HTMLElement>(
+          `[data-goto-role="${CSS.escape(tab.dataset.roleTab)}"]`,
+        );
+        if (first?.dataset.goto) show(first.dataset.goto);
+      }
+    });
+
+    const fromHash = () => {
+      const key = decodeURIComponent(location.hash.slice(1));
+      if (key) show(key, false);
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+  }
+</script>

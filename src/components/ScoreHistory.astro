@@ -1,0 +1,159 @@
+---
+/**
+ * Évolution du score par fenêtre — mini-graphe SVG.
+ *
+ * La bande claire est l'intervalle : sur un split court elle est large, et
+ * c'est exactement ce qu'il faut voir avant de conclure à une progression.
+ * Les fenêtres sont ordonnées par DATE et non par libellé : « Rounds 3-5 »,
+ * « Cup » et « Champ 1 » ne s'ordonnent pas alphabétiquement.
+ */
+import { isRated, type RatedScore, type Window } from "../lib/contract";
+import { num, splitLabel } from "../lib/display";
+
+interface Props {
+  windows: Window[];
+}
+
+const { windows } = Astro.props;
+
+// Une fenêtre sans projection monde (`no_anchor`) n'a pas d'intervalle : elle
+// n'a rien à faire sur une courbe dont la bande EST l'intervalle.
+const points = windows
+  .filter((w) => isRated(w.score))
+  .sort((a, b) => (a.to ?? "").localeCompare(b.to ?? ""))
+  .map((w) => ({ ...w, score: w.score as RatedScore }));
+
+const W = 640;
+const H = 150;
+const PAD_X = 12;
+const PAD_TOP = 12;
+const PAD_BOTTOM = 34;
+
+const values = points.flatMap((p) => [p.score.ci_low, p.score.ci_high]);
+const lo = Math.max(0, Math.floor((Math.min(...values) - 3) / 5) * 5);
+const hi = Math.min(100, Math.ceil((Math.max(...values) + 3) / 5) * 5);
+const span = hi - lo || 1;
+
+const x = (i: number) =>
+  points.length === 1
+    ? W / 2
+    : PAD_X + (i * (W - 2 * PAD_X)) / (points.length - 1);
+const y = (v: number) =>
+  PAD_TOP + (1 - (v - lo) / span) * (H - PAD_TOP - PAD_BOTTOM);
+
+// Une saison compte jusqu'à quatre splits : sur sept ans, les étiquettes se
+// chevauchent. On n'en écrit qu'une sur N, les autres restant lisibles au
+// survol du point.
+const LABEL_EVERY = Math.ceil(points.length / 7);
+const labelled = (i: number) =>
+  points.length <= 7 || i % LABEL_EVERY === 0 || i === points.length - 1;
+
+const line = points.map((p, i) => `${i ? "L" : "M"} ${x(i).toFixed(1)} ${y(p.score.world).toFixed(1)}`).join(" ");
+const band = [
+  ...points.map((p, i) => `${i ? "L" : "M"} ${x(i).toFixed(1)} ${y(p.score.ci_high).toFixed(1)}`),
+  ...points
+    .slice()
+    .reverse()
+    .map((p, i) => `L ${x(points.length - 1 - i).toFixed(1)} ${y(p.score.ci_low).toFixed(1)}`),
+  "Z",
+].join(" ");
+---
+
+{
+  points.length === 0 ? (
+    <p class="text-sm text-muted">Aucune fenêtre notée pour ce rôle.</p>
+  ) : (
+    <div class="overflow-x-auto">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        class="h-auto w-full min-w-[360px]"
+        role="img"
+        aria-label="Évolution du score par fenêtre"
+      >
+        {[lo, (lo + hi) / 2, hi].map((v) => (
+          <g>
+            <line
+              x1={PAD_X}
+              x2={W - PAD_X}
+              y1={y(v)}
+              y2={y(v)}
+              stroke="var(--color-line)"
+              stroke-dasharray="2 4"
+            />
+            <text
+              x={PAD_X}
+              y={y(v) - 4}
+              font-size="10"
+              fill="var(--color-faint)"
+              class="tnum"
+            >
+              {num(v, 0)}
+            </text>
+          </g>
+        ))}
+
+        {points.length > 1 && (
+          <path d={band} fill="var(--color-accent)" opacity="0.14" />
+        )}
+        <path
+          d={line}
+          fill="none"
+          stroke="var(--color-accent)"
+          stroke-width="2"
+          stroke-linejoin="round"
+        />
+
+        {points.map((p, i) => (
+          <g>
+            {points.length === 1 && (
+              <line
+                x1={x(i)}
+                x2={x(i)}
+                y1={y(p.score.ci_low)}
+                y2={y(p.score.ci_high)}
+                stroke="var(--color-accent)"
+                stroke-width="2"
+                opacity="0.4"
+              />
+            )}
+            <circle
+              cx={x(i)}
+              cy={y(p.score.world)}
+              r="4"
+              fill="var(--color-bg)"
+              stroke="var(--color-accent)"
+              stroke-width="2"
+            >
+              <title>
+                {`${p.year} ${splitLabel(p)} — ${num(p.score.world)} (${num(p.score.ci_low)}–${num(p.score.ci_high)}), ${p.n_games} parties`}
+              </title>
+            </circle>
+            {labelled(i) && (
+              <>
+                <text
+                  x={x(i)}
+                  y={H - 16}
+                  text-anchor="middle"
+                  font-size="10"
+                  fill="var(--color-muted)"
+                  class="tnum"
+                >
+                  {num(p.score.world, 0)}
+                </text>
+                <text
+                  x={x(i)}
+                  y={H - 4}
+                  text-anchor="middle"
+                  font-size="9"
+                  fill="var(--color-faint)"
+                >
+                  {p.year} {p.is_season ? "" : p.split}
+                </text>
+              </>
+            )}
+          </g>
+        ))}
+      </svg>
+    </div>
+  )
+}

@@ -1,0 +1,302 @@
+---
+/**
+ * Page ligue : ce que vaut la ligue, comment ça a bougé, et qui y joue.
+ *
+ * L'ancrage est la seule chose du modèle qui autorise à comparer deux ligues.
+ * Cette page est donc l'endroit où il doit être dit en clair — y compris
+ * quand il n'existe pas, ou quand il repose sur une échelle locale qui
+ * n'engage rien au-delà de son groupe de ligues.
+ */
+import Base from "../../layouts/Base.astro";
+import LeagueAnchor from "../../components/LeagueAnchor.astro";
+import ScoreHistogram from "../../components/ScoreHistogram.astro";
+import { getLeague, getLeagueIndex } from "../../lib/data";
+import { ROLE_LABELS, STATUS_LABELS, int, num } from "../../lib/display";
+
+export function getStaticPaths() {
+  return getLeagueIndex().map((entry) => ({
+    params: { league: entry.league },
+  }));
+}
+
+const league = getLeague(Astro.params.league!);
+const seasons = [...league.seasons].sort((a, b) => b.year - a.year);
+const latest = seasons[0]!;
+
+// Évolution de l'ancrage, en points de score. Les valeurs viennent converties
+// de l'export : la page trace, elle ne convertit pas.
+const trend = [...league.seasons]
+  .filter((season) => season.anchor_points !== null)
+  .sort((a, b) => a.year - b.year)
+  .map((season) => ({
+    year: season.year,
+    value: season.anchor_points!.value,
+    low: season.anchor_points!.ci_low,
+    high: season.anchor_points!.ci_high,
+    published: season.anchor?.publication === "published",
+  }));
+
+const W = 640;
+const H = 180;
+const PAD_X = 34; // place pour les graduations, à gauche
+const PAD_TOP = 14;
+const PAD_BOTTOM = 26;
+
+// L'échelle inclut toujours le zéro : c'est la moyenne des ligues de premier
+// niveau, et une courbe qui ne la montrerait pas ne dirait plus rien.
+const bounds = [0, ...trend.flatMap((p) => [p.low, p.high])];
+const lo = Math.floor((Math.min(...bounds) - 1) / 2) * 2;
+const hi = Math.ceil((Math.max(...bounds) + 1) / 2) * 2;
+const ticks = [lo, (lo + hi) / 2, hi].filter(
+  (value, i, all) => all.indexOf(value) === i,
+);
+
+const tx = (i: number) =>
+  trend.length <= 1 ? W / 2 : PAD_X + (i * (W - PAD_X - 12)) / (trend.length - 1);
+const ty = (v: number) =>
+  PAD_TOP + (1 - (v - lo) / (hi - lo || 1)) * (H - PAD_TOP - PAD_BOTTOM);
+
+const roster = [...latest.roster].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+---
+
+<Base
+  title={`${league.label} | LoL Scout`}
+  description={`Force de la ligue ${league.league}, distribution des scores et effectif — ${latest.year}.`}
+>
+  <header>
+    <h1 class="m-0 text-2xl font-bold tracking-tight">{league.label}</h1>
+    <p class="mt-1 text-sm text-muted">
+      {league.league}
+      {league.region && <span> · {league.region}</span>}
+      {latest.tier && <span> · {latest.tier}</span>}
+      <span> · {league.seasons.length} saisons observées</span>
+    </p>
+    {
+      league.lineage && league.lineage.chain.length > 1 && (
+        <p class="mt-1 text-xs text-faint">
+          Même compétition que {league.lineage.chain.filter((c) => c !== league.league).join(", ")} —
+          un changement de nom n'est pas un changement de ligue.
+        </p>
+      )
+    }
+  </header>
+
+  <section class="mt-5">
+    <h2 class="m-0 mb-2 text-sm font-semibold uppercase tracking-wide text-faint">
+      Force de la ligue — {latest.year}
+    </h2>
+    <LeagueAnchor
+      anchor={latest.anchor}
+      points={latest.anchor_points}
+      year={latest.year}
+      league={league.league}
+    />
+  </section>
+
+  {
+    trend.length > 1 && (
+      <section class="mt-6">
+        <h2 class="m-0 mb-2 text-sm font-semibold uppercase tracking-wide text-faint">
+          Évolution de l'ancrage
+        </h2>
+        <div class="overflow-x-auto">
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            class="h-auto w-full min-w-[320px]"
+            role="img"
+            aria-label="Évolution de l'ancrage de la ligue, en points de score"
+          >
+            {ticks.map((value) => (
+              <g>
+                <line
+                  x1={PAD_X}
+                  x2={W - 12}
+                  y1={ty(value)}
+                  y2={ty(value)}
+                  stroke="var(--color-line)"
+                  stroke-dasharray={value === 0 ? "none" : "2 4"}
+                />
+                <text
+                  x={PAD_X - 6}
+                  y={ty(value) + 3}
+                  text-anchor="end"
+                  font-size="10"
+                  fill="var(--color-faint)"
+                  class="tnum"
+                >
+                  {value > 0 ? "+" : ""}
+                  {num(value, 0)}
+                </text>
+              </g>
+            ))}
+            <text
+              x={PAD_X + 4}
+              y={ty(0) - 5}
+              font-size="10"
+              fill="var(--color-faint)"
+            >
+              moyenne des ligues T1
+            </text>
+
+            <path
+              d={[
+                ...trend.map((p, i) => `${i ? "L" : "M"} ${tx(i).toFixed(1)} ${ty(p.high).toFixed(1)}`),
+                ...trend
+                  .slice()
+                  .reverse()
+                  .map((p, i) => `L ${tx(trend.length - 1 - i).toFixed(1)} ${ty(p.low).toFixed(1)}`),
+                "Z",
+              ].join(" ")}
+              fill="var(--color-accent)"
+              opacity="0.14"
+            />
+            <path
+              d={trend.map((p, i) => `${i ? "L" : "M"} ${tx(i).toFixed(1)} ${ty(p.value).toFixed(1)}`).join(" ")}
+              fill="none"
+              stroke="var(--color-accent)"
+              stroke-width="2"
+            />
+
+            {trend.map((p, i) => (
+              <g>
+                <circle
+                  cx={tx(i)}
+                  cy={ty(p.value)}
+                  r="4"
+                  fill={p.published ? "var(--color-accent)" : "var(--color-bg)"}
+                  stroke="var(--color-accent)"
+                  stroke-width="2"
+                >
+                  <title>
+                    {`${p.year} : ${p.value > 0 ? "+" : ""}${num(p.value)} points (${num(p.low)} – ${num(p.high)})${p.published ? "" : " — expérimental"}`}
+                  </title>
+                </circle>
+                <text
+                  x={tx(i)}
+                  y={H - 4}
+                  text-anchor="middle"
+                  font-size="10"
+                  fill="var(--color-faint)"
+                  class="tnum"
+                >
+                  {p.year}
+                </text>
+              </g>
+            ))}
+          </svg>
+        </div>
+        <p class="mt-1 text-xs leading-snug text-faint">
+          En points de score. Un point creux est un ancrage expérimental. L'échelle
+          est recentrée chaque année sur la moyenne des ligues de premier
+          niveau : une remontée dit un rapprochement du sommet, pas une
+          progression absolue.
+        </p>
+      </section>
+    )
+  }
+
+  <section class="mt-6">
+    <h2 class="m-0 mb-2 text-sm font-semibold uppercase tracking-wide text-faint">
+      Distribution des scores — {latest.year}
+    </h2>
+    <ScoreHistogram
+      histogram={latest.scores.histogram}
+      median={latest.scores.median}
+      n={latest.scores.n_players}
+    />
+    <p class="mt-1 text-xs text-faint">
+      {int(latest.scores.n_published)} publiés sur {int(latest.scores.n_players)} notés
+      {latest.scores.p10 !== null && latest.scores.p90 !== null && (
+        <span class="tnum">
+          {" "}· 80 % des joueurs entre {num(latest.scores.p10)} et {num(latest.scores.p90)}
+        </span>
+      )}
+    </p>
+  </section>
+
+  <section class="mt-6">
+    <h2 class="m-0 mb-2 text-sm font-semibold uppercase tracking-wide text-faint">
+      Effectif {latest.year}
+    </h2>
+    {
+      roster.length === 0 ? (
+        <p class="text-sm text-muted">Aucun joueur noté sur cette saison.</p>
+      ) : (
+        <ol class="m-0 list-none space-y-1 p-0">
+          {roster.map((player, i) => (
+            <li class="flex items-center gap-2.5 rounded-lg border border-line bg-surface px-2.5 py-2">
+              <span class="tnum w-6 shrink-0 text-right text-xs text-faint">{i + 1}</span>
+              <span class="min-w-0 flex-1">
+                <a
+                  href={player.slug ? `/joueur/${player.slug}` : undefined}
+                  class="block truncate text-sm font-medium hover:underline"
+                >
+                  {player.handle ?? "inconnu"}
+                </a>
+                <span class="block truncate text-[11px] text-faint">
+                  {ROLE_LABELS[player.role] ?? player.role} · {player.team ?? "sans équipe"}
+                  {player.weight_covered !== null && player.weight_covered < 1 && (
+                    <span class="tnum text-tone-mid">
+                      {" "}· noté sur {num(player.weight_covered * 100, 0)} % des pans
+                    </span>
+                  )}
+                </span>
+              </span>
+              <span class="w-24 shrink-0 text-right">
+                {player.score === null ? (
+                  <span class="text-xs text-faint">pas de score</span>
+                ) : (
+                  <>
+                    <span class="tnum text-base font-semibold">{num(player.score)}</span>
+                    <span class="tnum block text-[11px] text-faint">
+                      ± {num(
+                        Math.max(
+                          player.score - (player.ci_low ?? player.score),
+                          (player.ci_high ?? player.score) - player.score,
+                        ),
+                      )}
+                      {" · "}
+                      {int(player.n_games)} p.
+                    </span>
+                  </>
+                )}
+              </span>
+              {player.status !== "published" && (
+                <span class="shrink-0 rounded border border-tone-mid/40 px-1 text-[10px] text-tone-mid">
+                  {STATUS_LABELS[player.status]}
+                </span>
+              )}
+            </li>
+          ))}
+        </ol>
+      )
+    }
+  </section>
+
+  {
+    seasons.length > 1 && (
+      <section class="mt-6">
+        <h2 class="m-0 mb-2 text-sm font-semibold uppercase tracking-wide text-faint">
+          Saisons précédentes
+        </h2>
+        <ul class="m-0 list-none space-y-1 p-0 text-xs">
+          {seasons.slice(1).map((season) => (
+            <li class="flex flex-wrap items-baseline gap-x-2 rounded-lg border border-line bg-surface px-2.5 py-1.5">
+              <span class="tnum font-medium text-ink">{season.year}</span>
+              <span class="text-faint">{season.tier}</span>
+              <span class="tnum text-muted">
+                {season.anchor_points === null
+                  ? "pas d'ancrage"
+                  : `${season.anchor_points.value > 0 ? "+" : ""}${num(season.anchor_points.value)} points`}
+              </span>
+              <span class="tnum text-faint">
+                {int(season.scores.n_players)} joueurs
+                {season.scores.median !== null && ` · médiane ${num(season.scores.median)}`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+</Base>

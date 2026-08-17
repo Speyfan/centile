@@ -1,0 +1,44 @@
+---
+/**
+ * 404 — utile plutôt que décorative.
+ *
+ * Le cas le plus fréquent sera un lien de fiche périmé : le pseudo d'un joueur
+ * a changé, le slug avec. La page renvoie donc vers la recherche, qui indexe
+ * aussi les anciens pseudos.
+ */
+import Base from "../layouts/Base.astro";
+import { getMeta } from "../lib/data";
+import { int } from "../lib/display";
+
+const meta = getMeta();
+---
+
+<Base title="Page introuvable | LoL Scout" description="Cette page n'existe pas.">
+  <section class="rounded-xl border border-line bg-surface p-6">
+    <p class="tnum m-0 text-4xl font-bold tracking-tight text-faint">404</p>
+    <h1 class="mt-2 text-xl font-bold">Cette page n'existe pas</h1>
+    <p class="mt-3 text-sm leading-relaxed text-muted">
+      Si vous cherchiez une fiche joueur, son adresse a pu changer : elle
+      contient le pseudo, et un joueur qui change de nom change de lien. La
+      recherche connaît aussi les anciens pseudos.
+    </p>
+    <div class="mt-4 flex flex-wrap gap-2">
+      <a
+        href="/"
+        class="rounded-md border border-accent/50 bg-accent/10 px-3 py-1.5 text-sm hover:bg-accent/20"
+      >
+        Rechercher un joueur
+      </a>
+      <a
+        href="/classements"
+        class="rounded-md border border-line bg-surface px-3 py-1.5 text-sm hover:border-accent/50"
+      >
+        Voir les classements
+      </a>
+    </div>
+    <p class="mt-4 text-xs text-faint">
+      {int(meta.corpus.n_rated_players)} joueurs notés, {int(meta.corpus.n_leagues)} ligues,
+      saisons {meta.corpus.first_year}–{meta.corpus.last_year}.
+    </p>
+  </section>
+</Base>

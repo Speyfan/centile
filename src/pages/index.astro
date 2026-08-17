@@ -1,0 +1,309 @@
+---
+/**
+ * Accueil : trouver un joueur, ou voir qui domine.
+ *
+ * La recherche ne charge son index qu'à la première frappe (530 Ko contre
+ * 2,2 Mo pour l'index complet) : l'accueil reste léger sur mobile, où il est
+ * le plus souvent ouvert.
+ */
+import Base from "../layouts/Base.astro";
+import { getLeagueIndex, getMeta, getRanking, listRankingYears } from "../lib/data";
+import { ROLE_LABELS, int, isSeasonInProgress, num } from "../lib/display";
+
+const meta = getMeta();
+const years = listRankingYears();
+const year = years[years.length - 1]!;
+const ranking = getRanking(year);
+const leagues = getLeagueIndex();
+
+// Top par rôle : publiés seulement. Un classement d'accueil qui mélangerait
+// les échelles donnerait le premier mondial à la ligue la moins mesurée.
+const top = meta.roles.map((role) => ({
+  role,
+  players: ranking.rows
+    .filter((row) => row.role === role && row.status === "published" && row.score !== null)
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+    .slice(0, 10),
+}));
+
+const published = ranking.rows.filter((r) => r.status === "published").length;
+---
+
+<Base
+  title="LoL Scout — stats et scouting esport League of Legends"
+  description="Comparer les joueurs professionnels de League of Legends au sein d'une ligue et entre ligues : percentiles par pan de jeu et score mondial sur 100."
+>
+  <section>
+    <h1 class="m-0 text-2xl font-bold tracking-tight">
+      Comparer des joueurs, d'une ligue à l'autre
+    </h1>
+    <p class="mt-2 text-sm leading-relaxed text-muted">
+      {int(meta.corpus.n_rated_players)} joueurs notés sur {int(meta.corpus.n_leagues)} ligues,
+      saisons {meta.corpus.first_year}–{meta.corpus.last_year}. Chaque score est
+      un percentile par pan de jeu, projeté sur une échelle mondiale par la
+      force mesurée de la ligue — avec son incertitude, toujours.
+    </p>
+  </section>
+
+  <section class="mt-5">
+    <label for="search" class="sr-only">Rechercher un joueur</label>
+    <input
+      id="search"
+      type="search"
+      autocomplete="off"
+      placeholder="Rechercher un joueur — Faker, Chovy, Caps…"
+      class="w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-faint"
+    />
+    <p id="search-state" class="mt-1 text-xs text-faint" hidden></p>
+    <ul id="search-results" class="mt-2 list-none space-y-1 p-0"></ul>
+  </section>
+
+  <section class="mt-7">
+    <div class="flex items-baseline justify-between">
+      <h2 class="m-0 text-sm font-semibold uppercase tracking-wide text-faint">
+        Meilleurs joueurs {year}
+      </h2>
+      <a href="/classements" class="text-xs text-accent hover:underline">
+        classement complet
+      </a>
+    </div>
+    <p class="mt-1 text-xs text-faint">
+      {int(published)} joueurs publiés sur la saison. Les ligues dont l'écart au
+      reste du monde n'est pas établi n'apparaissent pas ici.
+      {isSeasonInProgress(year, meta) && (
+        <span class="text-tone-mid">
+          {" "}Saison en cours : volumes courts, intervalles larges.
+        </span>
+      )}
+    </p>
+
+    <div class="mt-3 flex flex-wrap gap-1.5" data-top-tabs>
+      {
+        meta.roles.map((role, i) => (
+          <button
+            type="button"
+            data-top-tab={role}
+            aria-current={i === 0}
+            class="rounded-md border border-line bg-surface px-2.5 py-1 text-xs text-muted aria-[current=true]:border-accent/50 aria-[current=true]:bg-accent/10 aria-[current=true]:text-ink"
+          >
+            {ROLE_LABELS[role]}
+          </button>
+        ))
+      }
+    </div>
+
+    {
+      top.map((group, i) => (
+        <ol data-top-panel={group.role} hidden={i !== 0} class="mt-2 list-none space-y-1 p-0">
+          {group.players.map((player, rank) => (
+            <li class="flex items-center gap-2.5 rounded-lg border border-line bg-surface px-2.5 py-2">
+              <span class="tnum w-5 shrink-0 text-right text-xs text-faint">{rank + 1}</span>
+              <span class="min-w-0 flex-1">
+                <a
+                  href={`/joueur/${player.slug}`}
+                  class="block truncate text-sm font-medium hover:underline"
+                >
+                  {player.handle}
+                </a>
+                <span class="block truncate text-[11px] text-faint">
+                  {player.team ?? "sans équipe"} ·{" "}
+                  <a href={`/ligue/${player.league}`} class="hover:underline">
+                    {player.league}
+                  </a>
+                </span>
+              </span>
+              <span class="w-20 shrink-0 text-right">
+                <span class="tnum text-base font-semibold">{num(player.score ?? 0)}</span>
+                <span class="tnum block text-[11px] text-faint">
+                  ± {num(
+                    Math.max(
+                      (player.score ?? 0) - (player.ci_low ?? 0),
+                      (player.ci_high ?? 0) - (player.score ?? 0),
+                    ),
+                  )}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ol>
+      ))
+    }
+  </section>
+
+  <section class="mt-7">
+    <h2 class="m-0 text-sm font-semibold uppercase tracking-wide text-faint">Ligues</h2>
+    <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
+      {
+        leagues
+          .filter((entry) => entry.tier === "T1" || entry.tier === "T2")
+          .sort(
+            (a, b) =>
+              (a.tier ?? "").localeCompare(b.tier ?? "") ||
+              a.league.localeCompare(b.league),
+          )
+          .map((entry) => (
+            <li>
+              <a
+                href={`/ligue/${entry.league}`}
+                class="inline-block rounded-md border border-line bg-surface px-2 py-1 text-xs hover:border-accent/50"
+              >
+                {entry.league}
+                <span class="ml-1 text-faint">{entry.tier}</span>
+              </a>
+            </li>
+          ))
+      }
+    </ul>
+  </section>
+
+  <section class="mt-7 rounded-xl border border-line bg-surface p-4">
+    <h2 class="m-0 text-sm font-semibold">Comment le score est construit</h2>
+    <p class="mt-1.5 text-sm leading-relaxed text-muted">
+      Un joueur est d'abord comparé à ses pairs — même rôle, même ligue, même
+      fenêtre — pan de jeu par pan de jeu. Ces percentiles sont pondérés selon
+      ce qui définit le rôle, puis translatés sur une échelle commune par la
+      force mesurée de la ligue. Ce qui n'est pas mesurable n'est pas inventé :
+      un pan sans données s'affiche vide avec son motif, une ligue sans ancrage
+      n'a pas de score mondial.
+    </p>
+    <a href="/methode" class="mt-2 inline-block text-xs text-accent hover:underline">
+      La méthode en détail
+    </a>
+  </section>
+</Base>
+
+<style>
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+</style>
+
+<script>
+  // Onglets du top par rôle.
+  const tabs = document.querySelector("[data-top-tabs]");
+  tabs?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>("[data-top-tab]");
+    const role = button?.dataset.topTab;
+    if (!role) return;
+    document.querySelectorAll<HTMLElement>("[data-top-tab]").forEach((node) => {
+      node.setAttribute("aria-current", String(node.dataset.topTab === role));
+    });
+    document.querySelectorAll<HTMLElement>("[data-top-panel]").forEach((node) => {
+      node.hidden = node.dataset.topPanel !== role;
+    });
+  });
+
+  // Recherche : l'index n'est chargé qu'à la première frappe.
+  type Row = {
+    s: string;
+    h: string;
+    k: string;
+    r: string | null;
+    l: string | null;
+    y: number | null;
+    c: number | null;
+    t: string;
+  };
+  const LABELS: Record<string, string> = {
+    top: "Toplaner",
+    jng: "Jungler",
+    mid: "Midlaner",
+    bot: "ADC",
+    sup: "Support",
+  };
+
+  const input = document.getElementById("search") as HTMLInputElement | null;
+  const results = document.getElementById("search-results");
+  const state = document.getElementById("search-state");
+  let index: Row[] | null = null;
+  let loading: Promise<Row[]> | null = null;
+
+  const load = () => {
+    loading ??= fetch("/search-index.json")
+      .then((response) => response.json())
+      .then((payload) => (index = payload.players as Row[]));
+    return loading;
+  };
+
+  const fold = (value: string) =>
+    value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+  const render = (rows: Row[], query: string) => {
+    if (!results || !state) return;
+    results.replaceChildren();
+    if (!query) {
+      state.hidden = true;
+      return;
+    }
+    state.hidden = false;
+    state.textContent = rows.length
+      ? `${rows.length} joueur${rows.length > 1 ? "s" : ""}`
+      : "Aucun joueur de ce nom dans le corpus.";
+
+    for (const row of rows.slice(0, 12)) {
+      const item = document.createElement("li");
+      item.className =
+        "flex items-center gap-2.5 rounded-lg border border-line bg-surface px-2.5 py-2";
+
+      const link = document.createElement("a");
+      link.href = `/joueur/${row.s}`;
+      link.className = "min-w-0 flex-1";
+      const name = document.createElement("span");
+      name.className = "block truncate text-sm font-medium";
+      name.textContent = row.h;
+      const context = document.createElement("span");
+      context.className = "block truncate text-[11px] text-faint";
+      context.textContent = [
+        row.r ? (LABELS[row.r] ?? row.r) : null,
+        row.l,
+        row.y,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      link.append(name, context);
+
+      const score = document.createElement("span");
+      score.className = "shrink-0 text-right";
+      if (row.c === null) {
+        score.className += " text-xs text-faint";
+        score.textContent = "non noté";
+      } else {
+        score.className += " tnum text-sm font-semibold";
+        score.textContent = row.c.toFixed(1).replace(".", ",");
+      }
+
+      item.append(link, score);
+      results.appendChild(item);
+    }
+  };
+
+  input?.addEventListener("input", async () => {
+    const query = fold(input.value.trim());
+    if (!query) return render([], "");
+    if (!index) {
+      if (state) {
+        state.hidden = false;
+        state.textContent = "Chargement de l'index…";
+      }
+      await load();
+    }
+    const rows = (index ?? [])
+      .filter((row) => row.k.includes(query))
+      // Un préfixe passe avant une correspondance interne : « bo » doit rendre
+      // Bo avant Berserker.
+      .sort((a, b) => {
+        const pa = a.k.startsWith(query) ? 0 : 1;
+        const pb = b.k.startsWith(query) ? 0 : 1;
+        return pa - pb || (b.c ?? -1) - (a.c ?? -1);
+      });
+    render(rows, query);
+  });
+</script>

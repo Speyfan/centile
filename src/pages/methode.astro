@@ -1,0 +1,375 @@
+---
+/**
+ * La méthode.
+ *
+ * Tout ce qui est chiffré ici vient de `meta.json` — corpus, seuils,
+ * calibration, poids des pans, et jusqu'à la concordance des deux signaux
+ * d'ancrage. Rien n'est saisi à la main : une page méthode qui annoncerait un
+ * seuil que le moteur n'applique plus, ou une corrélation qui a dérivé depuis
+ * qu'on l'a écrite, ferait exactement le contraire de ce qu'elle promet.
+ */
+import Base from "../layouts/Base.astro";
+import { getMeta } from "../lib/data";
+import {
+  PAN_HINTS,
+  PAN_LABELS,
+  STAT_LABELS,
+  int,
+  num,
+  ratio,
+} from "../lib/display";
+
+const meta = getMeta();
+const roles = meta.roles;
+const pans = Object.keys(meta.pans.stats).filter(
+  (pan) => !meta.pans.descriptive.includes(pan),
+);
+const agreement = meta.validation.anchor_agreement;
+
+// En-têtes courts : la matrice doit tenir sans défilement à 360 px.
+const ROLE_SHORT: Record<string, string> = {
+  top: "Top",
+  jng: "Jungle",
+  mid: "Mid",
+  bot: "ADC",
+  sup: "Sup.",
+};
+---
+
+<Base
+  title="Méthode | LoL Scout"
+  description="Comment le score sur 100 est construit : percentiles par pan de jeu, correction par le champion, ancrages de ligue, incertitude, et ce que la méthode ne voit pas."
+>
+  <h1 class="m-0 text-2xl font-bold tracking-tight">La méthode</h1>
+
+  <nav class="mt-4 rounded-lg border border-line bg-surface p-3 text-sm">
+    <ol class="m-0 list-decimal space-y-1 pl-5 text-muted">
+      <li><a href="#bref" class="hover:underline">En bref</a></li>
+      <li><a href="#donnees" class="hover:underline">Les données</a></li>
+      <li>
+        <a href="#percentiles" class="hover:underline">
+          Des percentiles, pas des moyennes
+        </a>
+      </li>
+      <li><a href="#champion" class="hover:underline">À champion égal</a></li>
+      <li><a href="#echelle" class="hover:underline">L'échelle mondiale</a></li>
+      <li>
+        <a href="#incertitude" class="hover:underline">Le ± n'est pas décoratif</a>
+      </li>
+      <li><a href="#limites" class="hover:underline">Ce que la méthode rate</a></li>
+      <li><a href="#pas" class="hover:underline">Ce que la note n'est pas</a></li>
+    </ol>
+  </nav>
+
+  <!-- ---------------------------------------------------------- en bref -->
+  <section id="bref" class="mt-7">
+    <h2 class="m-0 text-lg font-semibold">En bref</h2>
+    <p class="mt-2 text-sm leading-relaxed text-muted">
+      Chaque joueur est noté sur ce qu'il fait, comparé à ceux qui font le même
+      métier que lui — même rôle, même ligue, même période. Ces notes par
+      facette de jeu sont ensuite projetées sur une échelle mondiale commune,
+      calibrée par les seules choses qui permettent honnêtement de comparer des
+      ligues entre elles : leurs confrontations directes et les joueurs qui
+      passent de l'une à l'autre. Chaque chiffre publié porte son intervalle
+      d'incertitude, et quand les données ne permettent pas de conclure, le
+      site le dit au lieu de deviner.
+    </p>
+  </section>
+
+  <!-- --------------------------------------------------------- données -->
+  <section id="donnees" class="mt-7">
+    <h2 class="m-0 text-lg font-semibold">Les données</h2>
+    <p class="mt-2 text-sm leading-relaxed text-muted">
+      Les statistiques proviennent des données de matchs professionnels
+      compilées par Oracle's Elixir, couvrant
+      {" "}<span class="tnum text-ink">{meta.corpus.first_year}–{meta.corpus.last_year}</span>{" "}
+      et <span class="tnum text-ink">{int(meta.corpus.n_games)}</span> parties sur
+      {" "}<span class="tnum text-ink">{int(meta.corpus.n_leagues)}</span> compétitions,
+      des ligues majeures aux scènes régionales. Toutes les parties ne portent
+      pas le même niveau de détail : certaines ligues (la LPL notamment, sur
+      plusieurs saisons) ne fournissent pas les statistiques de phase de lane.
+      Ces trous ne sont jamais comblés par des estimations — ils sont affichés,
+      et la note s'adapte en le disant.
+    </p>
+  </section>
+
+  <!-- ----------------------------------------------------- percentiles -->
+  <section id="percentiles" class="mt-7">
+    <h2 class="m-0 text-lg font-semibold">Des percentiles, pas des moyennes</h2>
+    <p class="mt-2 text-sm leading-relaxed text-muted">
+      Un chiffre brut ne veut rien dire seul : 600 dégâts par minute est
+      excellent pour un support et médiocre pour un milieu. Chaque statistique
+      d'un joueur est donc convertie en percentile au sein de son groupe de
+      comparaison — les joueurs du même rôle, dans la même ligue, sur la même
+      période. Ces percentiles sont regroupés en « pans » de jeu (phase de
+      lane, dégâts, vision, discipline…), dont la composition varie par rôle :
+      on ne juge pas un jungler et un tireur sur les mêmes choses.
+    </p>
+    <p class="mt-3 text-sm leading-relaxed text-muted">
+      Chaque statistique retenue a passé deux tests sur l'ensemble du corpus :
+      elle doit être <em>stable</em> (un joueur régulier y reste régulier) et
+      elle doit être <em>à lui</em> (sa valeur ne doit pas être expliquée par
+      celle de ses coéquipiers). Beaucoup de statistiques populaires échouent
+      au second test — la participation aux kills, par exemple, mesure surtout
+      l'équipe sous le nom du joueur. Elles sont affichées à titre descriptif,
+      mais n'entrent jamais dans la note.
+    </p>
+
+    <h3 class="mt-5 text-sm font-semibold">Les pans et leurs statistiques</h3>
+    {/* En blocs plutôt qu'en tableau : à 360 px, une troisième colonne part
+        hors du cadre et personne ne découvre qu'elle défile. */}
+    <ul class="mt-2 list-none space-y-2 p-0">
+      {
+        [...pans, ...meta.pans.descriptive].map((pan) => {
+          const isDescriptive = meta.pans.descriptive.includes(pan);
+          return (
+            <li class="rounded-lg border border-line bg-surface px-3 py-2.5">
+              <p class="m-0 flex flex-wrap items-baseline gap-2">
+                <span
+                  class={`text-sm font-medium ${isDescriptive ? "text-faint" : "text-ink"}`}
+                >
+                  {PAN_LABELS[pan] ?? pan}
+                </span>
+                {isDescriptive && (
+                  <span class="rounded border border-line px-1 text-[10px] uppercase tracking-wide text-faint">
+                    descriptif
+                  </span>
+                )}
+              </p>
+              <p class="m-0 mt-1 text-xs leading-snug text-muted">{PAN_HINTS[pan]}</p>
+              <p class="m-0 mt-1 text-xs text-faint">
+                {meta.pans.stats[pan]?.map((stat) => STAT_LABELS[stat] ?? stat).join(" · ")}
+              </p>
+            </li>
+          );
+        })
+      }
+    </ul>
+
+    <h3 class="mt-5 text-sm font-semibold">Ce qui compte, par rôle</h3>
+    {/* Les pans en lignes et les rôles en colonnes, et non l'inverse : cinq
+        rôles tiennent dans 360 px, sept pans non. Les poids exacts restent
+        affichés — ils le sont déjà sur chaque fiche, dans le pizza chart
+        comme sous chaque barre. Les arrondir ici les rendrait moins précis
+        que la page qu'ils servent à expliquer. */}
+    <div class="mt-2">
+      <table class="w-full border-collapse text-left text-[11px] sm:text-xs">
+        <caption class="sr-only">Poids de chaque pan dans la note, par rôle</caption>
+        <thead>
+          <tr class="border-b border-line text-faint">
+            <th scope="col" class="py-1.5 pr-1 font-medium">Pan</th>
+            {roles.map((role) => (
+              <th scope="col" class="py-1.5 text-right font-medium">
+                {ROLE_SHORT[role] ?? role}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {
+            pans.map((pan) => (
+              <tr class="border-b border-line/60">
+                <th scope="row" class="py-1.5 pr-1 font-medium text-ink">
+                  {PAN_LABELS[pan] ?? pan}
+                </th>
+                {roles.map((role) => {
+                  const weight = meta.pans.scored_by_role[role]?.[pan];
+                  return (
+                    <td class="tnum whitespace-nowrap py-1.5 text-right text-muted">
+                      {weight === undefined ? (
+                        <span class="text-faint" title="Ce pan n'est pas noté pour ce rôle.">
+                          —
+                        </span>
+                      ) : (
+                        `${Math.round(weight * 100)} %`
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-1.5 text-xs leading-snug text-faint">
+      Un tiret n'est pas un zéro : le pan n'est pas mesuré pour ce rôle. Le pan
+      Première ligne, par exemple, mesure la tenue du front pour quatre rôles —
+      et l'inverse pour un tireur, chez qui encaisser des dégâts n'est pas
+      tenir une ligne mais se faire toucher.
+    </p>
+
+    <dl class="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
+      <div class="rounded-lg border border-line bg-surface p-3">
+        <dt class="text-faint">Parties minimum par pan</dt>
+        <dd class="tnum m-0 mt-0.5 text-lg font-semibold">
+          {meta.thresholds.min_games_pan}
+        </dd>
+      </div>
+      <div class="rounded-lg border border-line bg-surface p-3">
+        <dt class="text-faint">Joueurs minimum dans un groupe</dt>
+        <dd class="tnum m-0 mt-0.5 text-lg font-semibold">
+          {meta.thresholds.min_pool_size}
+        </dd>
+      </div>
+      <div class="rounded-lg border border-line bg-surface p-3">
+        <dt class="text-faint">Parties minimum pour relier deux ligues</dt>
+        <dd class="tnum m-0 mt-0.5 text-lg font-semibold">
+          {meta.thresholds.min_games_edge}
+        </dd>
+      </div>
+    </dl>
+  </section>
+
+  <!-- -------------------------------------------------------- champion -->
+  <section id="champion" class="mt-7">
+    <h2 class="m-0 text-lg font-semibold">À champion égal</h2>
+    <p class="mt-2 text-sm leading-relaxed text-muted">
+      Un support qui joue des enchanteurs et un support qui joue des champions
+      d'engage n'ont pas les mêmes statistiques — par construction, pas par
+      talent. Un joueur de poke fait mécaniquement deux fois les dégâts d'un
+      joueur d'engage. Les statistiques dépendantes du champion sont donc
+      mesurées en écart à la référence mondiale de ce champion : la question
+      posée n'est pas « fait-il beaucoup de dégâts ? » mais « fait-il plus de
+      dégâts que les autres professionnels du monde entier sur ce même
+      champion ? ». Les références sont recalculées chaque saison, sur
+      l'ensemble des ligues.
+    </p>
+    <p class="mt-3 text-xs text-muted">
+      Statistiques mesurées en écart au champion :{" "}
+      {meta.pans.conditioned_stats.map((stat) => STAT_LABELS[stat] ?? stat).join(", ")}.
+    </p>
+  </section>
+
+  <!-- --------------------------------------------------------- échelle -->
+  <section id="echelle" class="mt-7">
+    <h2 class="m-0 text-lg font-semibold">L'échelle mondiale</h2>
+    <p class="mt-2 text-sm leading-relaxed text-muted">
+      Comparer un joueur de LFL et un joueur de LCK exige de savoir ce que vaut
+      la LFL face à la LCK — et ce n'est pas une opinion, c'est une quantité
+      mesurable, de deux façons indépendantes :
+    </p>
+    <ul class="mt-2 list-disc space-y-2 pl-5 text-sm leading-relaxed text-muted">
+      <li>
+        <strong class="font-medium text-ink">Les confrontations directes</strong> :
+        les tournois internationaux et inter-régionaux, analysés par un modèle
+        statistique de force d'équipe qui tient compte du fait que seules les
+        meilleures équipes d'une ligue voyagent.
+      </li>
+      <li>
+        <strong class="font-medium text-ink">Les transferts de joueurs</strong> :
+        quand un joueur change de ligue, l'écart entre son niveau relatif avant
+        et après mesure l'écart entre les deux ligues. Sur six saisons et
+        {" "}<span class="tnum">{int(meta.validation.transfers.n_moves)}</span> trajets,
+        corrigés de la progression naturelle des joueurs, ce signal couvre des
+        ligues que les tournois n'atteignent jamais.
+      </li>
+    </ul>
+    <p class="mt-3 text-sm leading-relaxed text-muted">
+      Ces deux mesures ne partagent aucune donnée. Sur les ligues où les deux
+      existent, elles concordent à{" "}
+      <span class="tnum font-medium text-ink">
+        {agreement.r === null ? "—" : ratio(agreement.r)}
+      </span>{" "}
+      de corrélation — c'est le test central de la méthode : deux instruments
+      indépendants qui donnent la même réponse. Là où les liens entre ligues
+      sont trop minces pour conclure, aucune note mondiale n'est publiée : la
+      fiche affiche alors une échelle locale, avec son motif.
+    </p>
+    <p class="mt-2 text-xs text-faint">
+      Mesuré sur <span class="tnum">{agreement.n_cells}</span> couples (ligue,
+      saison) portant les deux signaux{agreement.r_published !== null && (
+        <span class="tnum">
+          {" — "}{ratio(agreement.r_published)} sur les {agreement.n_published}{" "}
+          couples publiés
+        </span>
+      )}. Un logit d'ancrage vaut{" "}
+      <span class="tnum">{num(meta.score_scale.points_per_logit, 2)}</span> points
+      de score.
+    </p>
+  </section>
+
+  <!-- ----------------------------------------------------- incertitude -->
+  <section id="incertitude" class="mt-7">
+    <h2 class="m-0 text-lg font-semibold">Le ± n'est pas décoratif</h2>
+    <p class="mt-2 text-sm leading-relaxed text-muted">
+      Chaque note est publiée avec son intervalle, estimé par rééchantillonnage
+      des parties. Il s'élargit quand un joueur a peu joué, quand sa ligue est
+      mal reliée au reste du monde, ou quand des pans de sa grille manquent —
+      la fiche indique alors sur quelle part de la grille il est réellement
+      noté. Les classements distinguent les notes <em>publiées</em> (assez de
+      preuve pour comparer) des notes <em>expérimentales</em> (affichées, mais
+      avec un avertissement). L'échelle elle-même est figée par calibration
+      versionnée : une note ne change jamais sans que le joueur ait joué.
+    </p>
+    <p class="mt-2 text-xs text-faint">
+      Calibration en vigueur : médiane mondiale à 50, premier mondial à 99,
+      plafond d'affichage à <span class="tnum">{num(meta.score_scale.ceiling)}</span>,
+      figée le {meta.score_scale.calibrated_on}.
+    </p>
+  </section>
+
+  <!-- --------------------------------------------------------- limites -->
+  <section id="limites" class="mt-7">
+    <h2 class="m-0 text-lg font-semibold">Ce que la méthode rate — avec des noms</h2>
+    <p class="mt-2 text-sm leading-relaxed text-muted">
+      Aucun modèle honnête ne prétend tout voir. Trois limites connues,
+      assumées :
+    </p>
+    <ul class="mt-2 list-disc space-y-2 pl-5 text-sm leading-relaxed text-muted">
+      <li>
+        <strong class="font-medium text-ink">Les profils décisifs.</strong> La
+        note agrège la saison régulière : une phase de poules y pèse autant
+        qu'une finale. Un joueur dont la valeur explose dans les grands matchs
+        — les saisons 2025 de Faker ou de Zeka en sont l'exemple — est
+        structurellement sous-lu. C'est une limite de définition, pas un bug,
+        et une pondération par l'enjeu est à l'étude.
+      </li>
+      <li>
+        <strong class="font-medium text-ink">Les trous de données.</strong> Les
+        joueurs LPL de 2022 à 2025 sont notés sans statistiques de lane — Bin,
+        réputé précisément pour sa domination de lane, est noté sans ce qui
+        fait sa réputation. Sa fiche le dit.
+      </li>
+      <li>
+        <strong class="font-medium text-ink">Les ligues isolées.</strong> Plus
+        le chemin qui relie deux ligues est mince, plus l'intervalle d'une
+        comparaison entre leurs joueurs est large. Comparer deux midlaners de
+        LFL est précis ; comparer un joueur d'une petite ligue régionale à un
+        joueur de LCK l'est beaucoup moins, et l'intervalle affiché le reflète.
+      </li>
+    </ul>
+  </section>
+
+  <!-- ----------------------------------------------- ce que ce n'est pas -->
+  <section id="pas" class="mt-7">
+    <h2 class="m-0 text-lg font-semibold">Ce que la note n'est pas</h2>
+    <p class="mt-2 text-sm leading-relaxed text-muted">
+      Elle ne dit pas qui gagnerait un 1v1, ni qui est le plus « important »
+      pour son équipe, ni qui mérite un trophée. Elle dit une chose précise : à
+      quel point ce joueur est bon dans son métier, comparé à tous ceux qui
+      exercent le même métier dans le monde, sur la période mesurée — avec une
+      marge d'erreur qui est affichée parce qu'elle existe.
+    </p>
+    <p class="mt-3 text-xs leading-relaxed text-faint">
+      Les chiffres de cette page — corpus, calibration, seuils, concordance des
+      signaux — sont générés depuis les mêmes données que le reste du site, à
+      la date indiquée en pied de page. Modèle{" "}
+      <span class="font-mono">{meta.model_version}</span>.
+    </p>
+  </section>
+</Base>
+
+<style>
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+</style>

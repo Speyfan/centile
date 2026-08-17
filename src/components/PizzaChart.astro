@@ -1,0 +1,255 @@
+---
+/**
+ * Pizza chart des pans — le moment signature de la fiche.
+ *
+ * Deux dimensions, et elles disent deux choses différentes :
+ *   - le **rayon** d'une tranche est le percentile du pan dans son pool ;
+ *   - l'**angle** est le poids du pan dans la note du rôle. Le graphique
+ *     montre donc littéralement sa propre pondération : chez un ADC, Dégâts
+ *     occupe 35 % du disque parce qu'il pèse 35 % du score.
+ *
+ * Un pan sans valeur n'est pas retiré : il occupe son angle en gris hachuré,
+ * avec son motif au survol. Les trous sont une information.
+ *
+ * SVG pur, sans dépendance ni script : le même balisage servira au futur
+ * export image côté serveur.
+ */
+import type { Meta, Pan } from "../lib/contract";
+import {
+  PAN_LABELS,
+  gapScope,
+  num,
+  panTone,
+  unavailableMessage,
+  TONE_FILL,
+} from "../lib/display";
+
+interface Props {
+  pans: Pan[];
+  role: string;
+  league: string;
+  meta: Meta;
+  /** Identifiant unique : les motifs SVG sont globaux au document. */
+  uid?: string;
+}
+
+const { pans, role, league, meta, uid = "pizza" } = Astro.props;
+
+const weights = meta.pans.scored_by_role[role] ?? {};
+// Seuls les pans notés entrent dans le disque : un pan descriptif a un poids
+// nul, sa tranche serait d'épaisseur zéro. Ils vivent dans les barres.
+const slices = pans
+  .filter((pan) => weights[pan.pan] !== undefined)
+  .sort((a, b) => (weights[b.pan] ?? 0) - (weights[a.pan] ?? 0));
+
+const total = slices.reduce((sum, pan) => sum + (weights[pan.pan] ?? 0), 0) || 1;
+
+// Le cadre est plus large que haut : les libellés latéraux ont besoin de
+// place, et c'est à 360 px que ça se joue. « Discipline » ancré à droite
+// depuis un rayon trop grand sortait du cadre — le disque cède quelques
+// pixels pour que rien ne soit tronqué.
+const VIEW_W = 480;
+const VIEW_H = 424;
+const CX = 240;
+const CY = 200;
+const R_MIN = 36;
+const R_MAX = 132;
+const R_LABEL = 142;
+const PAD = 0.012; // radians de respiration entre deux tranches
+
+const radius = (percentile: number) =>
+  R_MIN + (Math.max(0, Math.min(100, percentile)) / 100) * (R_MAX - R_MIN);
+
+const point = (angle: number, r: number) => [
+  CX + r * Math.cos(angle),
+  CY + r * Math.sin(angle),
+];
+
+/** Secteur annulaire entre R_MIN et r, de a0 à a1. */
+function wedge(a0: number, a1: number, r: number): string {
+  const large = a1 - a0 > Math.PI ? 1 : 0;
+  const [x0, y0] = point(a0, R_MIN);
+  const [x1, y1] = point(a0, r);
+  const [x2, y2] = point(a1, r);
+  const [x3, y3] = point(a1, R_MIN);
+  return [
+    `M ${x0.toFixed(2)} ${y0.toFixed(2)}`,
+    `L ${x1.toFixed(2)} ${y1.toFixed(2)}`,
+    `A ${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`,
+    `L ${x3.toFixed(2)} ${y3.toFixed(2)}`,
+    `A ${R_MIN} ${R_MIN} 0 ${large} 0 ${x0.toFixed(2)} ${y0.toFixed(2)}`,
+    "Z",
+  ].join(" ");
+}
+
+let cursor = -Math.PI / 2;
+const geometry = slices.map((pan) => {
+  const span = ((weights[pan.pan] ?? 0) / total) * Math.PI * 2;
+  const a0 = cursor + PAD;
+  const a1 = cursor + span - PAD;
+  cursor += span;
+  const mid = (a0 + a1) / 2;
+  const value = pan.percentile;
+  const outer = value === null ? R_MAX : radius(value);
+  // La valeur reste dans sa tranche même quand celle-ci est courte.
+  const textR = Math.max(R_MIN + 17, outer - 16);
+  const [tx, ty] = point(mid, textR);
+  const [lx, ly] = point(mid, R_LABEL);
+  const cos = Math.cos(mid);
+  return {
+    pan,
+    a0,
+    a1,
+    mid,
+    outer,
+    tx,
+    ty,
+    lx,
+    ly,
+    anchor: Math.abs(cos) < 0.25 ? "middle" : cos > 0 ? "start" : "end",
+    tone: panTone(value),
+    weight: weights[pan.pan] ?? 0,
+    motif:
+      value === null && "unavailable" in pan
+        ? `${PAN_LABELS[pan.pan] ?? pan.pan} — ${unavailableMessage(pan.unavailable, league, meta)} (${gapScope(pan.unavailable)})`
+        : null,
+  };
+});
+
+const ringLabel = (value: number) => radius(value);
+---
+
+<figure class="m-0">
+  <svg
+    viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+    class="w-full h-auto"
+    role="img"
+    aria-label={`Percentiles par pan de jeu, ${slices.length} pans notés`}
+  >
+    <defs>
+      <pattern
+        id={`${uid}-hatch`}
+        width="7"
+        height="7"
+        patternTransform="rotate(45)"
+        patternUnits="userSpaceOnUse"
+      >
+        <rect width="7" height="7" fill="var(--color-surface-2)"></rect>
+        <line x1="0" y1="0" x2="0" y2="7" stroke="var(--color-tone-none)" stroke-width="3"
+        ></line>
+      </pattern>
+    </defs>
+
+    <!-- Repères aux deux seuils de couleur : on voit lesquels sont franchis,
+         même sans distinguer les teintes. -->
+    {
+      [40, 70, 100].map((value) => (
+        <circle
+          cx={CX}
+          cy={CY}
+          r={ringLabel(value)}
+          fill="none"
+          stroke="var(--color-line)"
+          stroke-width={value === 100 ? 1 : 1}
+          stroke-dasharray={value === 100 ? "none" : "2 4"}
+        />
+      ))
+    }
+
+    {
+      geometry.map((slice) => (
+        <g>
+          <path
+            d={wedge(slice.a0, slice.a1, R_MAX)}
+            fill="var(--color-surface)"
+            stroke="var(--color-line)"
+            stroke-width="1"
+          />
+          <path
+            d={wedge(slice.a0, slice.a1, slice.outer)}
+            fill={
+              slice.pan.percentile === null
+                ? `url(#${uid}-hatch)`
+                : TONE_FILL[slice.tone]
+            }
+            stroke="var(--color-bg)"
+            stroke-width="1.5"
+          >
+            {slice.motif && <title>{slice.motif}</title>}
+          </path>
+
+          <text
+            x={slice.tx}
+            y={slice.ty}
+            text-anchor="middle"
+            dominant-baseline="middle"
+            class="tnum"
+            font-size="15"
+            font-weight="700"
+            fill={
+              slice.pan.percentile === null ? "var(--color-muted)" : "#0b0e14"
+            }
+          >
+            {slice.pan.percentile === null ? "—" : num(slice.pan.percentile, 0)}
+          </text>
+
+          {/* Nom au-dessus, poids en dessous : sur deux lignes, un libellé
+              tient dans la marge latérale sans rogner le disque. */}
+          <text
+            x={slice.lx}
+            y={slice.ly - 5}
+            text-anchor={slice.anchor}
+            dominant-baseline="middle"
+            font-size="13"
+            fill="var(--color-ink)"
+          >
+            {PAN_LABELS[slice.pan.pan] ?? slice.pan.pan}
+          </text>
+          <text
+            x={slice.lx}
+            y={slice.ly + 9}
+            text-anchor={slice.anchor}
+            dominant-baseline="middle"
+            font-size="11"
+            class="tnum"
+            fill="var(--color-faint)"
+          >
+            {Math.round(slice.weight * 100)} % de la note
+          </text>
+        </g>
+      ))
+    }
+
+    <circle cx={CX} cy={CY} r={R_MIN - 3} fill="var(--color-bg)"></circle>
+    <text
+      x={CX}
+      y={CY - 6}
+      text-anchor="middle"
+      font-size="10"
+      fill="var(--color-faint)">percentile</text
+    >
+    <text
+      x={CX}
+      y={CY + 8}
+      text-anchor="middle"
+      font-size="10"
+      fill="var(--color-faint)">local</text
+    >
+  </svg>
+
+  <figcaption class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-faint">
+    <span class="flex items-center gap-1.5">
+      <span class="inline-block h-2.5 w-2.5 rounded-sm bg-tone-high"></span>≥ 70
+    </span>
+    <span class="flex items-center gap-1.5">
+      <span class="inline-block h-2.5 w-2.5 rounded-sm bg-tone-mid"></span>40 – 70
+    </span>
+    <span class="flex items-center gap-1.5">
+      <span class="inline-block h-2.5 w-2.5 rounded-sm bg-tone-low"></span>&lt; 40
+    </span>
+    <span class="flex items-center gap-1.5">
+      <span class="inline-block h-2.5 w-2.5 rounded-sm bg-tone-none"></span>indisponible
+    </span>
+    <span>Angle = poids du pan dans la note du rôle.</span>
+  </figcaption>
+</figure>
